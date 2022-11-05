@@ -1,0 +1,264 @@
+---
+
+- hosts: all
+  vars_files:
+          - vars/default.yml
+
+  tasks:
+
+          - name: update cache
+            become: "true"
+            apt:
+                    update_cache: yes
+                    upgrade: yes
+
+          - name: install software commons
+            become: "true"
+            apt:
+
+                    name:
+
+                            - apt-transport-https
+                            - lsb-release
+                            - ca-certificates
+                            - wget
+                    state: present
+                    update_cache: yes
+
+          - name: Add PHP 8 PPA to ubuntu
+            become: "true"
+            apt_repository:
+                    repo: ppa:ondrej/php
+
+          - name: update apt cache
+            become: "true"
+            apt:
+
+                    update_cache: yes
+
+          - name: install php8.1 and all extentions
+            become: "true"
+            apt: name={{ item }} state=latest force_apt_get=yes update_cache=yes
+            loop: ['php8.1', 'php8.1-cli', 'php8.1-common', 'php8.1-zip', 'php8.1-gd', 'php8.1-mbstring', 
+'php8.1-curl', 'php8.1-xml', 'php8.1-bcmath', 'apache2', 'php8.1-mysql', 'mysql-server', 
+'libapache2-mod-php', 'python3-pymysql']
+
+
+            #Create Document root file
+          - name: Create Document root
+            become: "true"
+            file:
+                    path: "/var/www/html/"
+                    state: directory
+                    owner: "{{ app_user }}"
+                    mode: 0755
+
+          - name: setup Apache vhost
+            become: "true"
+            template:
+                    src: "files/conaj.conf.j2"
+                    dest: "/etc/apache2/sites-available/{{ http_conf }}"
+          - name: Enable Apache site
+            become: "true"
+            shell: /usr/sbin/a2ensite {{ http_conf }}
+
+
+          - name: Disable Apache default site
+            become: "true"
+            shell: /usr/sbin/a2dissite 000-default.conf
+            when: disable_default
+
+
+          - name: rewrite module
+            become: "true"
+            shell: /usr/sbin/a2enmod rewrite
+
+          - name: enable ssl
+            become: "true"
+            shell: /usr/sbin/a2enmod ssl
+
+
+          - name: restart apache
+            become: "true"
+            shell: systemctl restart apache2
+
+          # MySQL Configurations
+          - name: set the root "mysql_password"
+            become: "true"
+            mysql_user:
+                    name: root
+                    password: "{{ mysql_root_password }}"
+                    login_unix_socket: /var/run/mysqld/mysqld.sock
+
+          - name: Remove all the mysql Database
+            become: "true"
+            mysql_db:
+                    name: test
+                    state: absent
+                    login_user: root
+                    login_password: "{{ mysql_root_password }}"
+
+          - name: Create a new MySQL Database
+            become: "true"
+            mysql_db:
+                    name: god
+                    state: present
+                    login_user: root
+                    login_password: "{{ mysql_root_password }}"
+
+               # php info file
+          - name: git clone laravel app
+            become: "true"
+            git:
+
+                    repo: https://github.com/f1amy/laravel-realworld-example-app.git
+                    dest: "/var/www/html/myapp"
+                    clone: yes
+
+           - name: set up .env file
+            become: "true"
+            template:
+
+                    src: "files/laravel-env.j2"
+                    dest: "/var/www/html/myapp/.env"
+
+
+          - name: set permission
+            become: "true"
+            file:
+                    dest: "/var/www/html/myapp"
+                    owner: "{{ app_user }}"
+                    group: www-data
+                    mode: 0775
+
+
+
+          - name: Set up additional directory permissions for www-data user on storage folder
+            become: "true"
+            file:
+                    dest: /var/www/html/myapp/storage/
+                    owner: "{{ app_user }}"
+                    group: www-data
+                    mode: 0775
+                    recurse: yes
+
+
+          - name: Set up additional directory permissions for www-data user on bootstrap/cache folder
+            become: "true"
+            file:
+                    dest: /var/www/html/myapp/bootstrap/cache/
+                    owner: "{{ app_user }}"
+                    group: www-data
+                    mode: 0775
+                    recurse: yes
+
+          - name: checks if composer is already installed
+            become: "true"
+            command: /usr/local/bin/composer
+            ignore_errors: true
+            register: composer_installed
+
+          - name: Install Composer if its not already installed
+            become: "true"
+            block:
+                    - name: Download Composer Installation Script
+                      become: "true"
+                      get_url:
+                              url: https://getcomposer.org/installer
+                              dest: /tmp/composer-setup.php
+
+                    - name: Run Composer Installer
+                      become: "true"
+                      command:
+                              cmd: /usr/bin/php /tmp/composer-setup.php
+                              creates: composer.phar
+
+                     - name: Copy Composer Executable to /usr/local/bin
+                      become: "true"
+                      copy:
+                              src: composer.phar
+                              dest: /usr/local/bin/composer
+                              remote_src: yes
+                              mode: '0755'
+
+                    - name: Remove phar
+                      become: "true"
+                      file:
+                              path: composer.phar
+                              state: absent
+
+                    - name: Remove Install Script
+                      become: "true"
+                      file:
+                              path: /tmp/composer-setup.php
+                              state: absent
+
+            when: composer_installed is failed
+
+          - name: add user to www-data group
+            become: "true"
+            user:
+
+                    name: ubuntu
+                    groups: www-data
+                    append: yes
+
+          - name: Give the right permissions to /var/www/html
+            become: "true"
+            file:
+
+                    dest: /var/www/html
+                    owner: root
+                    group: root
+                    mode: 0755
+
+
+          - name: Set permissions to the project
+            become: "true"
+            file:
+
+                    dest: /var/www/html/myapp
+                    owner: ubuntu
+                    group: www-data
+                    mode: 0774
+                    recurse: yes
+
+
+          - name: Install Dependencies with Composer
+            become: "false"
+            remote_user: ubuntu
+            shell: composer install
+            args:
+
+                   chdir: "/var/www/html/myapp"
+
+          - name: Generate app key
+            become: "false"
+            shell: php artisan key:generate
+            args:
+
+                    chdir: "/var/www/html/myapp"
+
+          - name: Migrate database
+            become: "false"
+            remote_user: ubuntu
+            shell: php artisan migrate
+            args:
+
+                    chdir: "/var/www/html/myapp"
+
+          - name: Migrate fresh
+            become: "false"
+            remote_user: ubuntu
+            shell: php artisan migrate:fresh
+            args:
+
+                    chdir: "/var/www/html/myapp"
+
+          - name: Transfer script
+            become: "true"
+            copy: src=psql-install.sh dest=/home/ubuntu/ mode=0775
+
+          - name: Execute the script
+            become: "true"
+            command: sh /home/ubuntu/psql-install.sh

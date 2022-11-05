@@ -1,0 +1,7 @@
+---
+mysql_root_password: ""
+app_user: ""
+http_host: "myapp"
+http_conf: "tosin.conf"
+http_port: "80"
+disable_default: true

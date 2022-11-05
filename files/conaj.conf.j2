@@ -1,0 +1,12 @@
+<VirtualHost *:{{ http_port }}>
+        ServerName 3.86.190.198
+        ServerAdmin webmaster@3.86.190.198
+        ServerAlias 3.86.190.198
+        DocumentRoot /var/www/html/myapp/public
+        ErrorLog ${APACHE_LOG_DIR}/error.log
+        CustomLog ${APACHE_LOG_DIR}/access.log combined
+
+        <Directory /var/www/html/myapp/>
+                AllowOverride All
+        </Directory>
+</VirtualHost>
